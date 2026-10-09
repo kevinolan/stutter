@@ -101,8 +101,20 @@ export async function logout(): Promise<void> {
   writeSession(null);
 }
 
+// The backend rotates refresh tokens, so concurrent 401s must share one refresh
+// call: a second /refresh with the already-rotated token would be rejected and
+// sign the clinician out.
+let inflightRefresh: Promise<Session | null> | null = null;
+
+function refresh(): Promise<Session | null> {
+  inflightRefresh ??= doRefresh().finally(() => {
+    inflightRefresh = null;
+  });
+  return inflightRefresh;
+}
+
 /** Silent refresh: exchange the stored refresh token for a fresh pair. Returns null on failure. */
-async function refresh(): Promise<Session | null> {
+async function doRefresh(): Promise<Session | null> {
   const s = readSession();
   if (!s?.refreshToken) return null;
   const res = await fetch(`${BACKEND_URL}/api/auth/refresh`, {
@@ -132,6 +144,10 @@ async function authedFetch(path: string, init: RequestInit = {}): Promise<Respon
 
   const res = await call(s.token);
   if (res.status !== 401) return res;
+
+  // Another request may have already refreshed while this one was in flight.
+  const current = readSession();
+  if (current && current.token !== s.token) return call(current.token);
 
   // Access token likely expired — try one silent refresh, then retry once.
   const next = await refresh();

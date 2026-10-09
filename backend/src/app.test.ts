@@ -160,6 +160,32 @@ describe('backend API (in-memory DB)', () => {
     expect(got.body).toHaveLength(2);
   });
 
+  test('POST /api/metrics accepts the flat snake_case format', async () => {
+    const user = await request(app).post('/api/users').send({ email: 's@n.com', displayName: 'Sam' });
+    const userId = user.body.id;
+
+    const res = await request(app).post('/api/metrics').send({
+      user_id: userId,
+      device_id: 'dev-snake',
+      recorded_at: '2026-10-10T12:00:00.000Z',
+      duration_sec: 60,
+      speech_rate: 117,
+      pauses: 12,
+      repetitions: 5,
+      prolongations: 2,
+      blocks: 3,
+      confidence: 0.87,
+    });
+    expect(res.status).toBe(202);
+    expect(res.body.accepted).toBe(1);
+
+    const got = await request(app)
+      .get(`/api/users/${userId}/metrics`)
+      .set('Authorization', authHeader({ sub: userId, role: 'client', email: 's@n.com' }));
+    expect(got.body).toHaveLength(1);
+    expect(got.body[0].pStutter).toBeCloseTo(0.87, 5);
+  });
+
   test('POST /api/metrics rejects a malformed payload with 400', async () => {
     const res = await request(app)
       .post('/api/metrics')

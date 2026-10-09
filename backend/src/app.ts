@@ -11,7 +11,7 @@
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import {
-  IngestMetricsSchema,
+  parseIngestPayload,
   CreateUserSchema,
   LoginRequestSchema,
   RefreshRequestSchema,
@@ -206,7 +206,7 @@ export function createApp(db: DbHandle): Express {
 
   // ── Metrics ingestion (mobile / desktop clients) ──────────────────────────
   app.post('/api/metrics', (req, res) => {
-    const parsed = IngestMetricsSchema.safeParse(req.body);
+    const parsed = parseIngestPayload(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_metrics', detail: parsed.error.message } satisfies ApiError);
     }

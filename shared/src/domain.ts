@@ -39,6 +39,9 @@ export type IngestMetrics = z.infer<typeof IngestMetricsSchema>;
 
 // ── User / auth ──────────────────────────────────────────────────────────────
 
+/** Mobile devices self-register as `<device-uuid>${DEVICE_EMAIL_DOMAIN}`. */
+export const DEVICE_EMAIL_DOMAIN = '@users.speechpal.local';
+
 export const UserSchema = z.object({
   id: z.string().min(1),
   email: z.string().email(),

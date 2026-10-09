@@ -6,8 +6,7 @@
     "moduleResolution": "bundler",
     "types": ["node"],
     "paths": {
-      "@/*": ["./*"],
-      "@/lib/*": ["./src/lib/*"]
+      "@/*": ["./*"]
     }
   },
   "include": [

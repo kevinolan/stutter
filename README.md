@@ -12,28 +12,37 @@ contract (`shared/`) and one on-device stutter model (`cnn_stutter_pcm.onnx`).
 | `stammer/training/` | Python (librosa + torchaudio) | Trains/fine-tunes the stutter detector and exports it to ONNX for in-browser inference. |
 | `stammer/stammer-app/` | React Native (Expo) — "SpeechPal" | Mobile guided-practice app (breathing, metronome, reading, DAF, record-and-score). |
 
-> **Status note (this section was previously inaccurate).** The "mobile" client
-> and the model-training pipeline are **both already built** — they live under
-> `stammer/`, not under the `mobile/` name the old README used. The mobile app is
-> currently **standalone** (see *Mobile app* below): it does not yet consume the
-> on-device model or post metrics to `backend`.
+> **Status note.** The mobile client and the model-training pipeline both live
+> under `stammer/` (not the `mobile/` name an older README used). The mobile app
+> is wired into the platform: it imports `shared/`, runs the ONNX model
+> on-device (iOS), and syncs metrics to `backend` — see *Mobile app* below.
 
 ## Architecture
 
-```
-                 ┌─────────────────────────────────────────────────────┐
-                 │  stammer/training/  (Python ML pipeline)             │
-                 │  train.py → checkpoints/cnn_best.pt                 │
-                 │  export_onnx_featured.py → onnx/cnn_stutter_pcm.onnx│
-                 └───────────────────────────┬─────────────────────────┘
-                                             │ copy model
-                                             ▼
- mobile (RN / SpeechPal)  ──┐        speech-therapy-app/  (PWA)  loads
- (standalone today)         │        /models/cnn_stutter_pcm.onnx, runs it
-                            ├─▶ POST /api/metrics ─▶ backend ─▶ SQLite (better-sqlite3)
- desktop PWA ───────────────┘        GET  /api/users/:id/metrics
-                                              │
-                                          web-admin (Next.js) reads
+```mermaid
+flowchart TD
+    training["stammer/training/ (Python)<br/>train.py → cnn_best.pt<br/>export_onnx_featured.py → cnn_stutter_pcm.onnx"]
+
+    subgraph clients["Clients — inference runs on-device"]
+        pwa["speech-therapy-app/ (desktop PWA)<br/>onnxruntime-web"]
+        mobile["stammer/stammer-app/ (SpeechPal, Expo)<br/>onnxruntime-react-native"]
+    end
+
+    shared[["shared/ — zod contract<br/>IngestMetrics · RecordingMetric · User"]]
+    backend["backend/ (Express)"]
+    db[("SQLite<br/>better-sqlite3")]
+    admin["web-admin/ (Next.js)<br/>clinician dashboard"]
+
+    training -- "copy .onnx → public/models/" --> pwa
+    training -- "copy .onnx → src/assets/models/" --> mobile
+    pwa -- "POST /api/metrics" --> backend
+    mobile -- "POST /api/metrics<br/>(offline queue)" --> backend
+    backend --> db
+    admin -- "GET /api/patients<br/>GET /api/users/:id/metrics" --> backend
+
+    shared -.-> pwa
+    shared -.-> mobile
+    shared -.-> backend
 ```
 
 - **On-device inference stays local.** The stutter model (ONNX) runs in the
@@ -42,8 +51,8 @@ contract (`shared/`) and one on-device stutter model (`cnn_stutter_pcm.onnx`).
 - **One shared contract.** `shared/` defines `RecordingMetric`, `IngestMetrics`,
   `User`, etc. The backend validates every request with the same zod schemas the
   clients use, so a breaking change is caught at the type level.
-- **`shared/` is not yet imported by `stammer/`** (the RN app and the training
-  pipeline carry their own types/schemas). Closing that gap is future work.
+- **`shared/` is imported by the RN app** (`@fluentpath/shared`, `file:` dep).
+  The Python training pipeline is the only tier that does not use it.
 
 ## Backend
 
@@ -177,15 +186,28 @@ fully on-device.
 
 ## Mobile app (`stammer/stammer-app/` — "SpeechPal")
 
-React Native app built with **Expo** (SDK 52, React 18, `expo-router`). It is the
-platform's mobile client but is currently **standalone**:
+React Native app built with **Expo** (SDK 52, React 18, `expo-router`) — the
+platform's mobile client.
 
 - Screens: guided home hub, **Breathing**, **Metronome**, **Reading**, **DAF**
   (delayed auditory feedback), and a **Speech Training** record/score screen.
-- It does **not** yet load `cnn_stutter_pcm.onnx` on-device, does **not** import
-  the `shared/` contract, and does **not** post metrics to `backend`/`/api/metrics`.
-- Package name is `speechpal` (the old README's `mobile/` name was never used;
-  this app *is* that slice).
+- **Platform wiring** (all in `stammer-app/lib/`, imported as `@/lib/*`):
+  - `identity.ts` — anonymous per-device UUID, registered via `POST /api/users`.
+  - `stutterModelRN.ts` — loads the bundled `src/assets/models/cnn_stutter_pcm.onnx`
+    with `onnxruntime-react-native` (same raw-PCM contract as the PWA).
+  - `analyzeRecording.ts` — decodes the recording, runs the model, and builds a
+    `RecordingMetric` / `IngestMetrics` payload typed by `@fluentpath/shared`.
+  - `syncQueue.ts` — AsyncStorage-backed offline queue; flushes to
+    `POST /api/metrics` after each recording and on app foreground.
+- **Platform caveat:** iOS records 16 kHz mono WAV, so the model scores every
+  recording. Android's `MediaRecorder` cannot write WAV, so Android recordings
+  are AAC and sync with `pStutter = null` (duration + self-rated ease only)
+  until a native PCM recorder or decoder is added.
+- `onnxruntime-react-native` is a native module: use a dev build
+  (`npx expo run:ios` / `run:android`), not Expo Go.
+- Set the backend with `EXPO_PUBLIC_BACKEND_URL` (defaults to `localhost:4000`,
+  or `10.0.2.2:4000` on the Android emulator).
+- Package name is `speechpal`.
 
 ### Run
 ```bash
@@ -194,8 +216,7 @@ npm install
 npm start            # expo start (then open on device / sim / web)
 ```
 
-Integrating it into the shared platform (consume the model, post metrics via the
-`shared` types) is tracked as future work below.
+
 
 ## What's verified
 - `backend`: `tsc` clean, 18 vitest integration tests (real in-memory
@@ -210,9 +231,10 @@ Integrating it into the shared platform (consume the model, post metrics via the
   (write-through persistence).
 
 ## Not yet done (next slices / hardening)
-- **Integrate the RN app into the platform** — consume `cnn_stutter_pcm.onnx`
-  on-device, post metrics to `backend`/`/api/metrics`, and import the `shared`
-  contract. The app exists; the wiring is the remaining work.
+- **On-device scoring on Android** — add a native PCM recorder (or an AAC
+  decoder) so Android recordings can be fed to the model like iOS ones.
+- **On-device STT for the mobile heuristic** — without a transcript the
+  repetition/prolongation/block counts are zero on mobile.
 - **Train on a real corpus** — the committed model is from the synthetic dataset;
   swap in UCLASS/FluencyBank/KCL and retrain for real-world accuracy.
 - **Production hardening (remaining):** move to a managed server database such as

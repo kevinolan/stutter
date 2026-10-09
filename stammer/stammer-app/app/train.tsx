@@ -17,6 +17,26 @@ import { getIdentity } from '@/lib/identity';
 import { analyzeRecording, buildIngestPayload } from '@/lib/analyzeRecording';
 import { enqueueMetrics, flushQueue } from '@/lib/syncQueue';
 
+/**
+ * iOS records 16 kHz mono 16-bit WAV so the on-device ONNX model can read raw
+ * PCM directly. Android's MediaRecorder has no WAV encoder, so it keeps the
+ * AAC preset and those recordings sync with `pStutter = null`.
+ */
+const RECORDING_OPTIONS: Audio.RecordingOptions = {
+  ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+  ios: {
+    extension: '.wav',
+    outputFormat: Audio.IOSOutputFormat.LINEARPCM,
+    audioQuality: Audio.IOSAudioQuality.HIGH,
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    bitRate: 256000,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+};
+
 export default function TrainScreen() {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -61,9 +81,7 @@ export default function TrainScreen() {
         playsInSilentModeIOS: true,
       });
 
-      const { recording: rec } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      const { recording: rec } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
       setRecording(rec);
       setIsRecording(true);
       setResults(null);

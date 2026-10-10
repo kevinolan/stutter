@@ -11,8 +11,9 @@
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import {
-  IngestMetricsSchema,
+  parseIngestPayload,
   CreateUserSchema,
+  DEVICE_EMAIL_DOMAIN,
   LoginRequestSchema,
   RefreshRequestSchema,
   type ApiError,
@@ -21,6 +22,7 @@ import {
 import type { DbHandle } from './db.js';
 import {
   createUser,
+  findByEmail,
   getUser,
   ingestBatch,
   listMetrics,
@@ -169,6 +171,17 @@ export function createApp(db: DbHandle): Express {
     }
     // The public endpoint never accepts a password (clients have no login yet).
     const { password: _ignore, ...clean } = parsed.data;
+    const existing = findByEmail(db, clean.email);
+    if (existing) {
+      // Mobile devices register as `<random-uuid>@users.speechpal.local`; knowing the
+      // email implies owning the device secret, so a retry (e.g. after a lost response)
+      // gets its existing client back. Any other duplicate is a plain conflict.
+      if (existing.role === 'client' && clean.email.toLowerCase().endsWith(DEVICE_EMAIL_DOMAIN)) {
+        const { passwordHash: _hash, ...user } = existing;
+        return res.status(200).json(user);
+      }
+      return res.status(409).json({ error: 'email_taken' } satisfies ApiError);
+    }
     const user = createUser(db, { ...clean, role: 'client' });
     db.persist(); // write-through: never lose a created user
     res.status(201).json(user);
@@ -206,10 +219,13 @@ export function createApp(db: DbHandle): Express {
 
   // ── Metrics ingestion (mobile / desktop clients) ──────────────────────────
   app.post('/api/metrics', (req, res) => {
-    const parsed = IngestMetricsSchema.safeParse(req.body);
+    const parsed = parseIngestPayload(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_metrics', detail: parsed.error.message } satisfies ApiError);
     }
+    // Without this, metrics posted under an unregistered id are stored but never
+    // reachable from any patient record.
+    if (!getUser(db, parsed.data.userId)) return notFound(db, res, parsed.data.userId);
     const { accepted, rejected } = ingestBatch(db, parsed.data);
     db.persist(); // write-through: persist ingested metrics immediately
     const ack = {

@@ -50,6 +50,29 @@ describe('backend API (in-memory DB)', () => {
     expect(res.body.role).toBe('client');
   });
 
+  test('POST /api/users is idempotent for device registrations', async () => {
+    const body = { email: '3f1c0d2e-aaaa-4bbb-8ccc-123456789abc@users.speechpal.local', displayName: 'SpeechPal User' };
+    const first = await request(app).post('/api/users').send(body);
+    const retry = await request(app).post('/api/users').send(body);
+    expect(first.status).toBe(201);
+    expect(retry.status).toBe(200);
+    expect(retry.body.id).toBe(first.body.id);
+    expect(retry.body.passwordHash).toBeUndefined();
+  });
+
+  test('POST /api/users returns 409 for other duplicate emails', async () => {
+    await request(app).post('/api/users').send({ email: 'dup@x.com', displayName: 'One' });
+    const res = await request(app).post('/api/users').send({ email: 'dup@x.com', displayName: 'Two' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('email_taken');
+  });
+
+  test('POST /api/users never hands back a clinician on a device-domain email', async () => {
+    createUser(db, { email: 'x@users.speechpal.local', displayName: 'Dr', role: 'clinician', password: 'password123' });
+    const res = await request(app).post('/api/users').send({ email: 'x@users.speechpal.local', displayName: 'Imp' });
+    expect(res.status).toBe(409);
+  });
+
   test('POST /api/users rejects an invalid email with 400', async () => {
     const res = await request(app)
       .post('/api/users')
@@ -158,6 +181,40 @@ describe('backend API (in-memory DB)', () => {
       .set('Authorization', authHeader({ sub: userId, role: 'client', email: 'e@f.com' }));
     expect(got.status).toBe(200);
     expect(got.body).toHaveLength(2);
+  });
+
+  test('POST /api/metrics accepts the flat snake_case format', async () => {
+    const user = await request(app).post('/api/users').send({ email: 's@n.com', displayName: 'Sam' });
+    const userId = user.body.id;
+
+    const res = await request(app).post('/api/metrics').send({
+      user_id: userId,
+      device_id: 'dev-snake',
+      recorded_at: '2026-10-10T12:00:00.000Z',
+      duration_sec: 60,
+      speech_rate: 117,
+      pauses: 12,
+      repetitions: 5,
+      prolongations: 2,
+      blocks: 3,
+      confidence: 0.87,
+    });
+    expect(res.status).toBe(202);
+    expect(res.body.accepted).toBe(1);
+
+    const got = await request(app)
+      .get(`/api/users/${userId}/metrics`)
+      .set('Authorization', authHeader({ sub: userId, role: 'client', email: 's@n.com' }));
+    expect(got.body).toHaveLength(1);
+    expect(got.body[0].pStutter).toBeCloseTo(0.87, 5);
+  });
+
+  test('POST /api/metrics rejects metrics for an unregistered user with 404', async () => {
+    const res = await request(app)
+      .post('/api/metrics')
+      .send({ userId: 'not-registered', deviceId: 'd', metrics: [sampleMetric()] });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('user_not_found');
   });
 
   test('POST /api/metrics rejects a malformed payload with 400', async () => {

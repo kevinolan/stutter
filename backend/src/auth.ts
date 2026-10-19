@@ -138,6 +138,6 @@ export function sha256(s: string): string {
 /** Extract a bearer token from an Authorization header, or null. */
 export function extractToken(authHeader: string | undefined): string | null {
   if (!authHeader) return null;
-  const m = authHeader.match(/^Bearer\s+(.+)$/i);
+  const m = authHeader.match(/^Bearer[ \t]+([A-Za-z0-9._-]+)$/i);
   return m ? m[1] : null;
 }

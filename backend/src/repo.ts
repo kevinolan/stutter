@@ -99,7 +99,7 @@ export function ensureSeeded(db: DbHandle): void {
     [user.id, user.email, user.displayName, user.role, hashPassword(password), user.createdAt],
   );
   db.persist();
-  console.log(`[seed] created default clinician ${email} (login: ${password})`);
+  console.log('[seed] created default clinician');
 }
 
 export function findByEmail(db: DbHandle, email: string): (User & { passwordHash: string | null }) | null {

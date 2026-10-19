@@ -26,11 +26,15 @@ export interface Identity {
 
 /** Simple RFC4122 v4 UUID (no dependency needed). */
 function uuid(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
+  const cryptoApi = typeof globalThis.crypto !== 'undefined' ? globalThis.crypto : undefined;
+  if (cryptoApi && 'randomUUID' in cryptoApi) {
+    return cryptoApi.randomUUID();
   }
   const b = new Uint8Array(16);
-  for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  if (!cryptoApi || !('getRandomValues' in cryptoApi)) {
+    throw new Error('Secure random number generator unavailable');
+  }
+  cryptoApi.getRandomValues(b);
   b[6] = (b[6] & 0x0f) | 0x40;
   b[8] = (b[8] & 0x3f) | 0x80;
   const hex = [...b].map((v) => v.toString(16).padStart(2, '0')).join('');

@@ -35,6 +35,9 @@ export const LOGIN_LOCKOUT_SECONDS = Number(process.env.LOGIN_LOCKOUT_SECONDS ??
 /** Per-IP rate limit on auth endpoints (requests / window). */
 export const AUTH_RATE_LIMIT = Number(process.env.AUTH_RATE_LIMIT ?? 20);
 export const AUTH_RATE_WINDOW_SECONDS = Number(process.env.AUTH_RATE_WINDOW_SECONDS ?? 60);
+/** Per-IP rate limit on authenticated API endpoints (requests / window). */
+export const API_RATE_LIMIT = Number(process.env.API_RATE_LIMIT ?? 60);
+export const API_RATE_WINDOW_SECONDS = Number(process.env.API_RATE_WINDOW_SECONDS ?? 60);
 
 /** Number of trusted reverse proxies in front of Express (0 when direct). */
 export const TRUST_PROXY = Number(process.env.TRUST_PROXY ?? 0);

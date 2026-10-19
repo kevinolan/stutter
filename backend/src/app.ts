@@ -78,6 +78,24 @@ export function createApp(db: DbHandle): Express {
   }
   app.use('/api/auth', applyAuthRateLimit);
 
+  function applyApiRateLimit(req: Request, res: Response, next: NextFunction): void {
+    const r = limiter.apiRateLimit(req);
+    if (r.limited) {
+      res.set('Retry-After', String(r.retryAfter));
+      res.status(429).json({
+        error: 'rate_limited',
+        detail: 'too_many_api_requests',
+        retryAfter: r.retryAfter,
+      } satisfies ApiError);
+      return;
+    }
+    next();
+  }
+  app.use(
+    ['/api/me', '/api/users', '/api/patients', '/api/metrics'],
+    applyApiRateLimit,
+  );
+
   // Health / readiness (open)
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, time: new Date().toISOString() });

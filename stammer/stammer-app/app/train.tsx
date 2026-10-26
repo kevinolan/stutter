@@ -253,7 +253,7 @@ export default function TrainScreen() {
         {results && (
           <View style={styles.resultsContainer}>
             <ThemedText type="subtitle" style={styles.resultsTitle}>
-              Analysis Complete
+              Practice saved
             </ThemedText>
 
             {/* Sync status indicator */}
@@ -288,15 +288,15 @@ export default function TrainScreen() {
               </ThemedText>
             </View>
 
-            {/* ONNX model status badge */}
-            <View style={styles.modelBadge}>
+            {/* Fluency-only model status; pronunciation is not automatically scored. */}
+            {pathway === 'fluency' ? <View style={styles.modelBadge}>
               <ThemedText style={styles.modelBadgeText}>
                 {results.usedModel ? 'ONNX model active' : 'Heuristic mode (model unavailable)'}
               </ThemedText>
-            </View>
+            </View> : null}
 
-            {/* Core stats grid */}
-            <View style={styles.metricRow}>
+            {/* Core fluency stats are not shown for pronunciation sessions. */}
+            {pathway === 'fluency' ? <View style={styles.metricRow}>
               {renderMetric(
                 'P(stutter)',
                 results.pStutter === null
@@ -307,7 +307,7 @@ export default function TrainScreen() {
               {renderMetric('Repetitions', results.repetitions)}
               {renderMetric('Prolongations', results.prolongations)}
               {renderMetric('Blocks', results.blocks)}
-            </View>
+            </View> : null}
 
             <View style={styles.easeCard}>
               <View style={styles.easeHeader}>
@@ -328,14 +328,14 @@ export default function TrainScreen() {
               <ThemedText style={styles.easeHint}>Your own sense of confidence while speaking</ThemedText>
             </View>
 
-            <View style={styles.metricRow}>
+            {pathway === 'fluency' ? <View style={styles.metricRow}>
               {renderMetric('Words', results.wordCount)}
               {renderMetric('Rate/min', results.ratePerMin)}
               {renderMetric('Disfluencies', results.disfluencies)}
-            </View>
+            </View> : null}
 
             {/* Encouraging, non-judgmental summary (ASHA-aligned) */}
-            {results.fluencySummary ? (
+            {pathway === 'fluency' && results.fluencySummary ? (
               <View style={styles.summaryCard}>
                 <ThemedText style={styles.summaryText}>{results.fluencySummary}</ThemedText>
               </View>

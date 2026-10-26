@@ -33,8 +33,12 @@ For the existing metrics backend, use a second terminal:
 ```bash
 cd backend
 npm install
+cp .env.example .env
+# Edit .env and set OPENAI_API_KEY only if you want to enable speech-to-text.
 npm run dev
 ```
+
+The backend loads `.env` for local development. Keep that file private; it is ignored by Git. Speech-to-text is optional and costs money through the provider account, so leave the key unset until you are ready to test it.
 
 The mobile client defaults to `http://10.0.2.2:4000` for Android emulator access to the host computer. For a physical device, set `EXPO_PUBLIC_BACKEND_URL` to a reachable LAN or deployed backend URL.
 

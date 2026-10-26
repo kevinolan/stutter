@@ -11,6 +11,20 @@ Deliver a testable Android-first MVP, not a clinically validated diagnostic prod
 - Important gaps: duplicate home route, default Expo Explore screen, no integrated STT, no pronunciation pathway, no local progress dashboard, no Supabase integration.
 - Time-box decision: keep the existing runtime during the 11-day delivery window; do not migrate frameworks mid-sprint. Record the Expo dependency as a product/architecture decision to revisit after delivery.
 
+## Current status (2026-10-27)
+Implemented on `feature/speechpal-11-day-mvp`:
+- Home / Progress / Settings navigation and distinct pronunciation / fluency routes.
+- Pronunciation prompt library and fluency activity hub connected to existing exercises.
+- Local session history, progress counts, clear-history control, temporary recording playback and cleanup.
+- Opt-in mobile transcription client, backend proxy to the OpenAI transcription endpoint, transcript/prompt word comparison, and an unconfigured-provider test.
+- Documentation for local setup and backend environment variables.
+
+Still blocking end-to-end completion:
+- Android emulator build, TypeScript checks, and backend tests have not yet been run from a local checkout.
+- Speech-to-text requires `OPENAI_API_KEY` in the backend environment.
+- The linked Supabase project is inactive; it has not been restored or modified.
+- The mobile app remains Expo-based because migrating native tooling mid-sprint risks the recording flow. Confirm whether avoiding Expo is still a hard requirement before investing in a migration.
+
 ## 11-day sprint
 1. **Foundation and route audit** — fix home routing, establish Home / Progress / Settings tabs, create the two separate pathways, keep changes on a feature branch.
 2. **Pronunciation journey** — exercise library, prompt selection, record/replay, prompt-aware result state.

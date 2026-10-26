@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocalSearchParams } from 'expo-router';
 import { StyleSheet, View, TouchableOpacity, Alert, Text, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
@@ -16,6 +17,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { getIdentity } from '@/lib/identity';
 import { analyzeRecording, buildIngestPayload } from '@/lib/analyzeRecording';
 import { enqueueMetrics, flushQueue } from '@/lib/syncQueue';
+import { savePracticeSession, type PracticePathway } from '@/lib/practiceHistory';
 
 /**
  * iOS records 16 kHz mono 16-bit WAV so the on-device ONNX model can read raw
@@ -38,6 +40,10 @@ const RECORDING_OPTIONS: Audio.RecordingOptions = {
 };
 
 export default function TrainScreen() {
+  const params = useLocalSearchParams<{ pathway?: string; exerciseTitle?: string; prompt?: string }>();
+  const pathway: PracticePathway = params.pathway === 'pronunciation' ? 'pronunciation' : 'fluency';
+  const exerciseTitle = typeof params.exerciseTitle === 'string' ? params.exerciseTitle : 'Guided speech practice';
+  const prompt = typeof params.prompt === 'string' ? params.prompt : undefined;
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -124,6 +130,23 @@ export default function TrainScreen() {
         // Phase 2+: auto-transcribe via on-device STT here.
       });
 
+      const feedback = pathway === 'pronunciation'
+        ? 'Recording captured. Automatic pronunciation comparison requires speech transcription, which is not configured yet. Listen to your attempt and retry when ready.'
+        : (analysis.fluencySummary ?? 'Recording captured. Take a moment to reflect on how speaking felt for you.');
+      await savePracticeSession({
+        id: analysis.metric.id,
+        pathway,
+        exerciseTitle,
+        prompt,
+        createdAt: analysis.metric.recordedAt,
+        durationSec: analysis.metric.durationSec,
+        pStutter: analysis.metric.pStutter,
+        wordCount: analysis.metric.heuristic.wordCount,
+        disfluencies: analysis.metric.heuristic.disfluencies,
+        easeRating,
+        feedback,
+      });
+
       setResults({
         pStutter: analysis.metric.pStutter,
         usedModel: analysis.usedModel,
@@ -187,8 +210,9 @@ export default function TrainScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <ThemedText type="title">Speech Training</ThemedText>
-        <ThemedText style={styles.subtitle}>Record your speech to analyze patterns</ThemedText>
+        <ThemedText type="title">{exerciseTitle}</ThemedText>
+        <ThemedText style={styles.subtitle}>{pathway === 'pronunciation' ? 'Record your attempt at your own pace.' : 'Record a short sample and reflect on how speaking felt.'}</ThemedText>
+        {prompt ? <View style={{ paddingHorizontal: 24, paddingBottom: 12 }}><ThemedText style={{ color: '#0F766E', fontWeight: '700', textAlign: 'center' }}>Practice prompt</ThemedText><ThemedText style={{ color: '#334155', fontSize: 17, lineHeight: 24, textAlign: 'center', marginTop: 5 }}>{prompt}</ThemedText></View> : null}
       </View>
 
       <View style={styles.content}>
@@ -318,8 +342,9 @@ export default function TrainScreen() {
             ) : (
               <View style={styles.summaryCard}>
                 <ThemedText style={styles.summaryText}>
-                  Recording saved. The on-device model analyzed your speech patterns.
-                  Share this with your clinician for context.
+                  {pathway === 'pronunciation'
+                    ? 'Your practice session has been saved on this device. Automatic pronunciation comparison is not configured yet, so this screen does not score how accurately you said the prompt.'
+                    : 'Your practice session has been saved. Some automated signals may be unavailable depending on the recording format. Use these results for reflection, not as a diagnosis.'}
                 </ThemedText>
               </View>
             )}

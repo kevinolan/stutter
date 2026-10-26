@@ -25,7 +25,7 @@ export async function transcribeRecording(uri: string): Promise<string> {
   const response = await fetch(`${BACKEND_URL}/api/transcribe`, {
     method: 'POST',
     headers: { 'Content-Type': contentType },
-    body: bytes.buffer,
+    body: bytes.buffer as ArrayBuffer,
   });
 
   if (!response.ok) {

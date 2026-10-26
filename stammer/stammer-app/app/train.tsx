@@ -152,6 +152,7 @@ export default function TrainScreen() {
       const durationSec = Math.round(status.durationMillis / 1000);
       await recording.stopAndUnloadAsync();
 
+      const identity = await getIdentity();
       let transcript: string | null = null;
       let transcriptionMessage: string | null = null;
       if (transcriptionConsent) {

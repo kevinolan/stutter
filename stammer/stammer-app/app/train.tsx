@@ -47,6 +47,7 @@ export default function TrainScreen() {
   const exerciseTitle = typeof params.exerciseTitle === 'string' ? params.exerciseTitle : 'Guided speech practice';
   const prompt = typeof params.prompt === 'string' ? params.prompt : undefined;
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
   const [recordingUri, setRecordingUri] = useState<string | null>(null);
   const [isPlayingBack, setIsPlayingBack] = useState(false);
   const playbackRef = useRef<Audio.Sound | null>(null);
@@ -78,6 +79,9 @@ export default function TrainScreen() {
   // Keep the temporary recording available for replay on this screen only.
   useEffect(() => {
     return () => {
+      const activeRecording = recordingRef.current;
+      recordingRef.current = null;
+      if (activeRecording) void activeRecording.stopAndUnloadAsync().catch(() => {});
       const sound = playbackRef.current;
       playbackRef.current = null;
       if (sound) void sound.unloadAsync().catch(() => {});
@@ -111,6 +115,7 @@ export default function TrainScreen() {
 
       const { recording: rec } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
       setRecording(rec);
+      recordingRef.current = rec;
       setRecordingUri(null);
       recordingUriRef.current = null;
       setIsRecording(true);
@@ -134,6 +139,7 @@ export default function TrainScreen() {
   async function stopRecording() {
     setIsRecording(false);
     setRecording(null);
+    recordingRef.current = null;
     scale.value = withTiming(1);
 
     if (!recording) return;

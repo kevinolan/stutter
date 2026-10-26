@@ -24,9 +24,31 @@ export default function TabLayout() {
         tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: ({ color }) => <IconSymbol size={23} name="house.fill" color={color} /> }} />
-      <Tabs.Screen name="progress" options={{ title: 'Progress', tabBarIcon: ({ color }) => <IconSymbol size={23} name="chart.bar.fill" color={color} }} />
-      <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: ({ color }) => <IconSymbol size={23} name="gearshape.fill" color={color} }} />
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Home',
+          tabBarIcon: ({ color }) => <IconSymbol size={23} name="house.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="progress"
+        options={{
+          title: 'Progress',
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={23} name="chart.bar.fill" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={23} name="gearshape.fill" color={color} />
+          ),
+        }}
+      />
       <Tabs.Screen name="explore" options={{ href: null }} />
     </Tabs>
   );

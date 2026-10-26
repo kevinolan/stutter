@@ -33,7 +33,7 @@ For the existing metrics backend, use a second terminal:
 ```bash
 cd backend
 npm install
-cp .env.example .env
+Copy-Item .env.example .env  # PowerShell on Windows
 # Edit .env and set OPENAI_API_KEY only if you want to enable speech-to-text.
 npm run dev
 ```

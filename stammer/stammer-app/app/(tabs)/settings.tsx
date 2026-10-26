@@ -34,7 +34,7 @@ export default function SettingsScreen() {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Audio privacy</Text>
-          <Text style={styles.cardText}>SpeechPal processes recordings for a practice session and removes the temporary file after analysis. Raw audio is not intentionally stored in your session history. Speech recognition and cloud processing will only be enabled once the backend service is configured.</Text>
+          <Text style={styles.cardText}>SpeechPal keeps the temporary recording available for replay only while the practice screen is open, then removes it when you leave or reset that screen. Raw audio is not intentionally stored in your session history. Cloud speech transcription is not yet enabled.</Text>
         </View>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Practice history</Text>

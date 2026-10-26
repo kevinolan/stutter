@@ -43,7 +43,8 @@ The mobile client defaults to `http://10.0.2.2:4000` for Android emulator access
 - Navigation: Home, Progress, Settings.
 - Two separate pathways and a guided prompt library.
 - Record, analyze available local fluency signals, replay the temporary recording, and save session summaries locally.
-- Speech-to-text and automated pronunciation comparison are **not configured yet**.
+- A consent-based speech-to-text client and server-side transcription proxy are implemented. To enable them, set `OPENAI_API_KEY` in the backend environment; never place the key in the mobile app. The feature is off by default.
+- Pronunciation feedback compares recognized words with the prompt; it is not an acoustic pronunciation score, and transcription can be wrong.
 - The current repository's sync backend is Express + SQLite. Supabase integration is planned, but requires the Supabase project to be active and configured before it can be verified.
 - The current project uses Expo Router. Do not migrate away from Expo during the short MVP sprint unless required by a blocking issue; that migration would increase delivery risk.
 

@@ -1,50 +1,57 @@
-# Welcome to your Expo app 👋
+# SpeechPal AI — Android-first mobile app
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+SpeechPal AI is the React Native mobile client in the FluentPath repository. It supports two distinct practice pathways:
 
-## Get started
+- **Pronunciation & articulation** — guided sound, word, and sentence prompts.
+- **Fluency & comfortable speaking** — guided recording, breathing, reading, rhythm, and optional delayed auditory feedback.
 
-1. Install dependencies
+The current app includes local practice history and an existing offline-first metrics sync path to the repository's Express/SQLite backend. The on-device ONNX analysis is best-effort and is not a clinical diagnostic tool.
 
-   ```bash
-   npm install
-   ```
+## Development
 
-2. Start the app
+Requirements:
+- Node.js LTS and npm
+- Android Studio with an Android SDK and emulator, or a physical Android device
+- VS Code
 
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+From the repository root:
 
 ```bash
-npm run reset-project
+cd stammer/stammer-app
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Start an Android emulator from Android Studio first. Then use the Expo CLI's Android option, or run:
 
-## Learn more
+```bash
+npx expo start --android
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+For the existing metrics backend, use a second terminal:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+cd backend
+npm install
+npm run dev
+```
 
-## Join the community
+The mobile client defaults to `http://10.0.2.2:4000` for Android emulator access to the host computer. For a physical device, set `EXPO_PUBLIC_BACKEND_URL` to a reachable LAN or deployed backend URL.
 
-Join our community of developers creating universal apps.
+## Current MVP scope and known gaps
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- Navigation: Home, Progress, Settings.
+- Two separate pathways and a guided prompt library.
+- Record, analyze available local fluency signals, replay the temporary recording, and save session summaries locally.
+- Speech-to-text and automated pronunciation comparison are **not configured yet**.
+- The current repository's sync backend is Express + SQLite. Supabase integration is planned, but requires the Supabase project to be active and configured before it can be verified.
+- The current project uses Expo Router. Do not migrate away from Expo during the short MVP sprint unless required by a blocking issue; that migration would increase delivery risk.
+
+## Privacy and clinical limits
+
+- Audio is kept temporarily for replay while the practice screen is open and removed when the screen is reset or unmounted.
+- Session history stores summaries and practice signals, not the audio file.
+- Automatic speech signals can be wrong and must not be represented as a diagnosis.
+- The app supports practice and reflection; it does not replace assessment or guidance from a qualified speech-language professional.
+
+See [../../docs/speechpal-11-day-delivery-plan.md](../../docs/speechpal-11-day-delivery-plan.md) for the sprint schedule and acceptance criteria.

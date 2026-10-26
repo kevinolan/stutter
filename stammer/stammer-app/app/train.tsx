@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { StyleSheet, View, TouchableOpacity, Alert, Text, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -45,6 +45,10 @@ export default function TrainScreen() {
   const exerciseTitle = typeof params.exerciseTitle === 'string' ? params.exerciseTitle : 'Guided speech practice';
   const prompt = typeof params.prompt === 'string' ? params.prompt : undefined;
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [recordingUri, setRecordingUri] = useState<string | null>(null);
+  const [isPlayingBack, setIsPlayingBack] = useState(false);
+  const playbackRef = useRef<Audio.Sound | null>(null);
+  const recordingUriRef = useRef<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<{
@@ -64,6 +68,18 @@ export default function TrainScreen() {
   const [easeRating, setEaseRating] = useState(50);
 
   const scale = useSharedValue(1);
+
+  // Keep the temporary recording available for replay on this screen only.
+  useEffect(() => {
+    return () => {
+      const sound = playbackRef.current;
+      playbackRef.current = null;
+      if (sound) void sound.unloadAsync().catch(() => {});
+      const uri = recordingUriRef.current;
+      recordingUriRef.current = null;
+      if (uri) void FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+    };
+  }, []);
 
   // Flush pending metrics on mount + app focus
   useEffect(() => {
@@ -89,6 +105,8 @@ export default function TrainScreen() {
 
       const { recording: rec } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
       setRecording(rec);
+      setRecordingUri(null);
+      recordingUriRef.current = null;
       setIsRecording(true);
       setResults(null);
       setSyncStatus('idle');
@@ -177,10 +195,8 @@ export default function TrainScreen() {
         setSyncStatus('offline');
       }
 
-      // Clean up the temp file
-      try {
-        await FileSystem.deleteAsync(uri, { idempotent: true });
-      } catch {}
+      // Keep the temporary file only for replay while this practice screen is open.
+      // It is removed when the user resets or leaves this screen.
     } catch (err) {
       console.error('Analysis failed', err);
       Alert.alert('Error', 'Could not process the recording.');
@@ -189,9 +205,48 @@ export default function TrainScreen() {
     }
   }
 
-  function reset() {
+  async function togglePlayback() {
+    if (!recordingUri) return;
+    try {
+      if (playbackRef.current && isPlayingBack) {
+        await playbackRef.current.stopAsync();
+        setIsPlayingBack(false);
+        return;
+      }
+      if (playbackRef.current) {
+        await playbackRef.current.unloadAsync().catch(() => {});
+        playbackRef.current = null;
+      }
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+      const { sound } = await Audio.Sound.createAsync({ uri: recordingUri }, { shouldPlay: true });
+      playbackRef.current = sound;
+      setIsPlayingBack(true);
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setIsPlayingBack(false);
+          void sound.unloadAsync().catch(() => {});
+          if (playbackRef.current === sound) playbackRef.current = null;
+        }
+      });
+    } catch (err) {
+      console.error('Playback failed', err);
+      Alert.alert('Playback unavailable', 'Could not play this recording. You can still finish your practice session.');
+      setIsPlayingBack(false);
+    }
+  }
+
+  async function reset() {
     setResults(null);
     setSyncStatus('idle');
+    setIsPlayingBack(false);
+    if (playbackRef.current) {
+      await playbackRef.current.unloadAsync().catch(() => {});
+      playbackRef.current = null;
+    }
+    const uri = recordingUriRef.current;
+    recordingUriRef.current = null;
+    setRecordingUri(null);
+    if (uri) await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
   }
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -349,6 +404,9 @@ export default function TrainScreen() {
               </View>
             )}
 
+            {recordingUri ? <TouchableOpacity style={styles.retryButton} onPress={togglePlayback}>
+              <ThemedText style={styles.retryText}>{isPlayingBack ? 'Stop playback' : 'Play your recording'}</ThemedText>
+            </TouchableOpacity> : null}
             <TouchableOpacity style={styles.retryButton} onPress={reset}>
               <ThemedText style={styles.retryText}>Record Again</ThemedText>
             </TouchableOpacity>

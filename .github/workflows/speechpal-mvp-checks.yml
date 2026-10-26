@@ -44,5 +44,7 @@ jobs:
           cache: npm
           cache-dependency-path: stammer/stammer-app/package-lock.json
       - run: npm ci --prefix stammer/stammer-app
-      - run: npx --prefix stammer/stammer-app tsc --noEmit -p stammer/stammer-app/tsconfig.json
-      - run: npx --prefix stammer/stammer-app expo export --platform android
+      - run: npx tsc --noEmit
+        working-directory: stammer/stammer-app
+      - run: npx expo export --platform android
+        working-directory: stammer/stammer-app

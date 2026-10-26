@@ -1,0 +1,48 @@
+name: SpeechPal MVP checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "stammer/stammer-app/**"
+      - "backend/**"
+      - "shared/**"
+      - ".github/workflows/speechpal-mvp-checks.yml"
+  push:
+    branches: ["feature/speechpal-11-day-mvp"]
+    paths:
+      - "stammer/stammer-app/**"
+      - "backend/**"
+      - "shared/**"
+      - ".github/workflows/speechpal-mvp-checks.yml"
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            shared/package-lock.json
+      - run: npm ci --prefix shared
+      - run: npm ci --prefix backend
+      - run: npm test --prefix backend
+
+  mobile:
+    name: Android bundle and TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: stammer/stammer-app/package-lock.json
+      - run: npm ci --prefix stammer/stammer-app
+      - run: npx --prefix stammer/stammer-app tsc --noEmit -p stammer/stammer-app/tsconfig.json
+      - run: npx --prefix stammer/stammer-app expo export --platform android

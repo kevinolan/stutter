@@ -83,6 +83,81 @@ export function createApp(db: DbHandle): Express {
     res.json({ ok: true, time: new Date().toISOString() });
   });
 
+  // Optional speech-to-text proxy. The provider key is kept on the server and
+  // raw audio is processed in memory only; this endpoint never persists audio.
+  const transcriptionWindows = new Map<string, number[]>();
+  app.post(
+    '/api/transcribe',
+    express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '20mb' }),
+    async (req, res) => {
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        return res.status(503).json({
+          error: 'transcription_not_configured',
+          detail: 'The server has not configured a transcription provider.',
+        } satisfies ApiError);
+      }
+
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return res.status(400).json({ error: 'invalid_audio', detail: 'Send a non-empty audio file.' } satisfies ApiError);
+      }
+
+      // A lightweight per-IP limit prevents accidental repeated requests.
+      const now = Date.now();
+      const ip = req.ip || 'unknown';
+      const recent = (transcriptionWindows.get(ip) ?? []).filter((time) => now - time < 15 * 60 * 1000);
+      if (recent.length >= 10) {
+        return res.status(429).json({ error: 'transcription_rate_limited' } satisfies ApiError);
+      }
+      recent.push(now);
+      transcriptionWindows.set(ip, recent);
+
+      const contentType = (req.header('content-type') ?? 'application/octet-stream').split(';')[0].trim();
+      const extension =
+        contentType === 'audio/wav' || contentType === 'audio/x-wav' ? 'wav'
+        : contentType === 'audio/mpeg' ? 'mp3'
+        : contentType === 'audio/mp4' || contentType === 'audio/m4a' ? 'm4a'
+        : contentType === 'audio/ogg' ? 'ogg'
+        : contentType === 'audio/webm' ? 'webm'
+        : contentType === 'audio/flac' ? 'flac'
+        : null;
+      if (!extension) {
+        return res.status(415).json({ error: 'unsupported_audio_type', detail: 'Use WAV, MP3, M4A, OGG, WebM, or FLAC.' } satisfies ApiError);
+      }
+
+      try {
+        const bytes = new Uint8Array(req.body);
+        const file = new Blob([bytes.buffer as ArrayBuffer], { type: contentType });
+        const form = new FormData();
+        form.append('file', file, `speechpal-recording.${extension}`);
+        form.append('model', process.env.OPENAI_TRANSCRIPTION_MODEL ?? 'gpt-4o-mini-transcribe');
+        form.append('response_format', 'json');
+        form.append('language', 'en');
+
+        const upstream = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}` },
+          body: form,
+        });
+
+        if (!upstream.ok) {
+          // Avoid logging or returning provider payloads that might contain sensitive details.
+          console.warn('[transcription] provider request failed with status', upstream.status);
+          return res.status(502).json({ error: 'transcription_provider_failed' } satisfies ApiError);
+        }
+
+        const result = await upstream.json() as { text?: unknown };
+        if (typeof result.text !== 'string' || !result.text.trim()) {
+          return res.status(422).json({ error: 'transcription_empty' } satisfies ApiError);
+        }
+        return res.json({ text: result.text.trim() });
+      } catch (error) {
+        console.error('[transcription] request failed', error instanceof Error ? error.message : 'unknown error');
+        return res.status(502).json({ error: 'transcription_unavailable' } satisfies ApiError);
+      }
+    },
+  );
+
   // ── Auth ───────────────────────────────────────────────────────────────
   app.post('/api/auth/login', (req, res) => {
     const parsed = LoginRequestSchema.safeParse(req.body);

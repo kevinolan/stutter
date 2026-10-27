@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, TouchableOpacity, Alert, Text, AppState } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import { StyleSheet, View, TouchableOpacity, Alert, Text, AppState, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
 import Slider from '@react-native-community/slider';
@@ -16,6 +17,9 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { getIdentity } from '@/lib/identity';
 import { analyzeRecording, buildIngestPayload } from '@/lib/analyzeRecording';
 import { enqueueMetrics, flushQueue } from '@/lib/syncQueue';
+import { savePracticeSession, type PracticePathway } from '@/lib/practiceHistory';
+import { transcribeRecording } from '@/lib/transcription';
+import { comparePrompt, type PromptComparison } from '@/lib/promptComparison';
 
 /**
  * iOS records 16 kHz mono 16-bit WAV so the on-device ONNX model can read raw
@@ -38,7 +42,16 @@ const RECORDING_OPTIONS: Audio.RecordingOptions = {
 };
 
 export default function TrainScreen() {
+  const params = useLocalSearchParams<{ pathway?: string; exerciseTitle?: string; prompt?: string }>();
+  const pathway: PracticePathway = params.pathway === 'pronunciation' ? 'pronunciation' : 'fluency';
+  const exerciseTitle = typeof params.exerciseTitle === 'string' ? params.exerciseTitle : 'Guided speech practice';
+  const prompt = typeof params.prompt === 'string' ? params.prompt : undefined;
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const [recordingUri, setRecordingUri] = useState<string | null>(null);
+  const [isPlayingBack, setIsPlayingBack] = useState(false);
+  const playbackRef = useRef<Audio.Sound | null>(null);
+  const recordingUriRef = useRef<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [results, setResults] = useState<{
@@ -53,11 +66,30 @@ export default function TrainScreen() {
     durationSec: number;
     easeRating: number;
     fluencySummary: string | null;
+    transcript: string | null;
+    comparison: PromptComparison | null;
+    transcriptionMessage: string | null;
   } | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'offline'>('idle');
   const [easeRating, setEaseRating] = useState(50);
+  const [transcriptionConsent, setTranscriptionConsent] = useState(false);
 
   const scale = useSharedValue(1);
+
+  // Keep the temporary recording available for replay on this screen only.
+  useEffect(() => {
+    return () => {
+      const activeRecording = recordingRef.current;
+      recordingRef.current = null;
+      if (activeRecording) void activeRecording.stopAndUnloadAsync().catch(() => {});
+      const sound = playbackRef.current;
+      playbackRef.current = null;
+      if (sound) void sound.unloadAsync().catch(() => {});
+      const uri = recordingUriRef.current;
+      recordingUriRef.current = null;
+      if (uri) void FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+    };
+  }, []);
 
   // Flush pending metrics on mount + app focus
   useEffect(() => {
@@ -83,6 +115,9 @@ export default function TrainScreen() {
 
       const { recording: rec } = await Audio.Recording.createAsync(RECORDING_OPTIONS);
       setRecording(rec);
+      recordingRef.current = rec;
+      setRecordingUri(null);
+      recordingUriRef.current = null;
       setIsRecording(true);
       setResults(null);
       setSyncStatus('idle');
@@ -104,6 +139,7 @@ export default function TrainScreen() {
   async function stopRecording() {
     setIsRecording(false);
     setRecording(null);
+    recordingRef.current = null;
     scale.value = withTiming(1);
 
     if (!recording) return;
@@ -117,11 +153,43 @@ export default function TrainScreen() {
       await recording.stopAndUnloadAsync();
 
       const identity = await getIdentity();
+      let transcript: string | null = null;
+      let transcriptionMessage: string | null = null;
+      if (transcriptionConsent) {
+        try {
+          transcript = await transcribeRecording(uri);
+        } catch (error) {
+          transcriptionMessage = error instanceof Error ? error.message : 'Speech-to-text could not run.';
+        }
+      }
+
       const analysis = await analyzeRecording({
         recordingUri: uri,
         durationSec,
         easeRating,
-        // Phase 2+: auto-transcribe via on-device STT here.
+        transcript: transcript ?? undefined,
+      });
+      const comparison = pathway === 'pronunciation' && prompt && transcript
+        ? comparePrompt(prompt, transcript)
+        : null;
+
+      const feedback = pathway === 'pronunciation'
+        ? (transcript
+          ? 'A transcript was created. Word matching is only a rough practice guide and does not measure pronunciation acoustically.'
+          : 'Recording captured. Enable speech-to-text if you want a transcript-based prompt comparison.')
+        : (analysis.fluencySummary ?? 'Recording captured. Take a moment to reflect on how speaking felt for you.');
+      await savePracticeSession({
+        id: analysis.metric.id,
+        pathway,
+        exerciseTitle,
+        prompt,
+        createdAt: analysis.metric.recordedAt,
+        durationSec: analysis.metric.durationSec,
+        pStutter: analysis.metric.pStutter,
+        wordCount: analysis.metric.heuristic.wordCount,
+        disfluencies: analysis.metric.heuristic.disfluencies,
+        easeRating,
+        feedback,
       });
 
       setResults({
@@ -136,6 +204,9 @@ export default function TrainScreen() {
         durationSec: analysis.metric.durationSec,
         easeRating,
         fluencySummary: analysis.fluencySummary,
+        transcript,
+        comparison,
+        transcriptionMessage,
       });
 
       // Build + enqueue the payload. If backend is reachable it posts
@@ -154,10 +225,8 @@ export default function TrainScreen() {
         setSyncStatus('offline');
       }
 
-      // Clean up the temp file
-      try {
-        await FileSystem.deleteAsync(uri, { idempotent: true });
-      } catch {}
+      // Keep the temporary file only for replay while this practice screen is open.
+      // It is removed when the user resets or leaves this screen.
     } catch (err) {
       console.error('Analysis failed', err);
       Alert.alert('Error', 'Could not process the recording.');
@@ -166,9 +235,48 @@ export default function TrainScreen() {
     }
   }
 
-  function reset() {
+  async function togglePlayback() {
+    if (!recordingUri) return;
+    try {
+      if (playbackRef.current && isPlayingBack) {
+        await playbackRef.current.stopAsync();
+        setIsPlayingBack(false);
+        return;
+      }
+      if (playbackRef.current) {
+        await playbackRef.current.unloadAsync().catch(() => {});
+        playbackRef.current = null;
+      }
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+      const { sound } = await Audio.Sound.createAsync({ uri: recordingUri }, { shouldPlay: true });
+      playbackRef.current = sound;
+      setIsPlayingBack(true);
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setIsPlayingBack(false);
+          void sound.unloadAsync().catch(() => {});
+          if (playbackRef.current === sound) playbackRef.current = null;
+        }
+      });
+    } catch (err) {
+      console.error('Playback failed', err);
+      Alert.alert('Playback unavailable', 'Could not play this recording. You can still finish your practice session.');
+      setIsPlayingBack(false);
+    }
+  }
+
+  async function reset() {
     setResults(null);
     setSyncStatus('idle');
+    setIsPlayingBack(false);
+    if (playbackRef.current) {
+      await playbackRef.current.unloadAsync().catch(() => {});
+      playbackRef.current = null;
+    }
+    const uri = recordingUriRef.current;
+    recordingUriRef.current = null;
+    setRecordingUri(null);
+    if (uri) await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
   }
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -187,12 +295,21 @@ export default function TrainScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <ThemedText type="title">Speech Training</ThemedText>
-        <ThemedText style={styles.subtitle}>Record your speech to analyze patterns</ThemedText>
+        <ThemedText type="title">{exerciseTitle}</ThemedText>
+        <ThemedText style={styles.subtitle}>{pathway === 'pronunciation' ? 'Record your attempt at your own pace.' : 'Record a short sample and reflect on how speaking felt.'}</ThemedText>
+        {prompt ? <View style={{ paddingHorizontal: 24, paddingBottom: 12 }}><ThemedText style={{ color: '#0F766E', fontWeight: '700', textAlign: 'center' }}>Practice prompt</ThemedText><ThemedText style={{ color: '#334155', fontSize: 17, lineHeight: 24, textAlign: 'center', marginTop: 5 }}>{prompt}</ThemedText></View> : null}
       </View>
 
       <View style={styles.content}>
         {!results && !isProcessing && (
+          <>
+          <View style={styles.consentCard}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <ThemedText style={styles.consentTitle}>Enable speech-to-text</ThemedText>
+              <ThemedText style={styles.consentCopy}>If enabled, this recording is sent to the configured transcription service. Leave off to keep audio on this device.</ThemedText>
+            </View>
+            <Switch value={transcriptionConsent} onValueChange={setTranscriptionConsent} trackColor={{ false: '#CBD5E1', true: '#7AD4C0' }} thumbColor={transcriptionConsent ? '#0F766E' : '#F8FAFC'} accessibilityLabel="Send recording for speech-to-text" />
+          </View>
           <View style={styles.recordContainer}>
             <Animated.View
               style={[
@@ -215,6 +332,7 @@ export default function TrainScreen() {
               {isRecording ? 'Stop to see analysis' : 'Tap to start recording'}
             </ThemedText>
           </View>
+          </>
         )}
 
         {isProcessing && (
@@ -229,7 +347,7 @@ export default function TrainScreen() {
         {results && (
           <View style={styles.resultsContainer}>
             <ThemedText type="subtitle" style={styles.resultsTitle}>
-              Analysis Complete
+              Practice saved
             </ThemedText>
 
             {/* Sync status indicator */}
@@ -264,15 +382,32 @@ export default function TrainScreen() {
               </ThemedText>
             </View>
 
-            {/* ONNX model status badge */}
-            <View style={styles.modelBadge}>
+            {results.transcript ? (
+              <View style={styles.transcriptCard}>
+                <ThemedText style={styles.transcriptTitle}>Speech-to-text transcript</ThemedText>
+                <ThemedText style={styles.transcriptText}>{results.transcript}</ThemedText>
+                {results.comparison ? (
+                  <View style={styles.comparisonBox}>
+                    <ThemedText style={styles.comparisonTitle}>Prompt word match: {results.comparison.accuracyPercent}%</ThemedText>
+                    <ThemedText style={styles.comparisonNote}>This compares recognized words with the prompt. It is not an acoustic pronunciation score, and the transcript may be inaccurate.</ThemedText>
+                    {results.comparison.missingWords.length ? <ThemedText style={styles.comparisonLine}>Not recognized: {results.comparison.missingWords.join(', ')}</ThemedText> : null}
+                    {results.comparison.extraWords.length ? <ThemedText style={styles.comparisonLine}>Other recognized words: {results.comparison.extraWords.join(', ')}</ThemedText> : null}
+                    {!results.comparison.missingWords.length && !results.comparison.extraWords.length ? <ThemedText style={styles.comparisonLine}>The recognized words match the prompt.</ThemedText> : null}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+            {results.transcriptionMessage ? <ThemedText style={styles.transcriptionWarning}>{results.transcriptionMessage}</ThemedText> : null}
+
+            {/* Fluency-only model status; pronunciation is not automatically scored. */}
+            {pathway === 'fluency' ? <View style={styles.modelBadge}>
               <ThemedText style={styles.modelBadgeText}>
                 {results.usedModel ? 'ONNX model active' : 'Heuristic mode (model unavailable)'}
               </ThemedText>
-            </View>
+            </View> : null}
 
-            {/* Core stats grid */}
-            <View style={styles.metricRow}>
+            {/* Core fluency stats are not shown for pronunciation sessions. */}
+            {pathway === 'fluency' ? <View style={styles.metricRow}>
               {renderMetric(
                 'P(stutter)',
                 results.pStutter === null
@@ -283,7 +418,7 @@ export default function TrainScreen() {
               {renderMetric('Repetitions', results.repetitions)}
               {renderMetric('Prolongations', results.prolongations)}
               {renderMetric('Blocks', results.blocks)}
-            </View>
+            </View> : null}
 
             <View style={styles.easeCard}>
               <View style={styles.easeHeader}>
@@ -304,26 +439,30 @@ export default function TrainScreen() {
               <ThemedText style={styles.easeHint}>Your own sense of confidence while speaking</ThemedText>
             </View>
 
-            <View style={styles.metricRow}>
+            {pathway === 'fluency' ? <View style={styles.metricRow}>
               {renderMetric('Words', results.wordCount)}
               {renderMetric('Rate/min', results.ratePerMin)}
               {renderMetric('Disfluencies', results.disfluencies)}
-            </View>
+            </View> : null}
 
             {/* Encouraging, non-judgmental summary (ASHA-aligned) */}
-            {results.fluencySummary ? (
+            {pathway === 'fluency' && results.fluencySummary ? (
               <View style={styles.summaryCard}>
                 <ThemedText style={styles.summaryText}>{results.fluencySummary}</ThemedText>
               </View>
             ) : (
               <View style={styles.summaryCard}>
                 <ThemedText style={styles.summaryText}>
-                  Recording saved. The on-device model analyzed your speech patterns.
-                  Share this with your clinician for context.
+                  {pathway === 'pronunciation'
+                    ? (transcriptionConsent ? 'Your session is saved. Speech-to-text did not return a transcript, so no prompt comparison is available.' : 'Your session is saved. Speech-to-text was off, so the recording was not sent to a transcription service.')
+                    : 'Your practice session has been saved. Some automated signals may be unavailable depending on the recording format. Use these results for reflection, not as a diagnosis.'}
                 </ThemedText>
               </View>
             )}
 
+            {recordingUri ? <TouchableOpacity style={styles.retryButton} onPress={togglePlayback}>
+              <ThemedText style={styles.retryText}>{isPlayingBack ? 'Stop playback' : 'Play your recording'}</ThemedText>
+            </TouchableOpacity> : null}
             <TouchableOpacity style={styles.retryButton} onPress={reset}>
               <ThemedText style={styles.retryText}>Record Again</ThemedText>
             </TouchableOpacity>
@@ -391,6 +530,35 @@ const styles = StyleSheet.create({
     color: '#64748B',
     fontWeight: '500',
   },
+  consentCard: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D9E9E2',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 28,
+  },
+  consentTitle: { color: '#173D3A', fontWeight: '800', fontSize: 14 },
+  consentCopy: { color: '#667673', fontSize: 12, lineHeight: 17, marginTop: 4 },
+  transcriptCard: {
+    width: '100%',
+    backgroundColor: '#F0FDF4',
+    padding: 15,
+    borderRadius: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#BBE7D4',
+  },
+  transcriptTitle: { color: '#14532D', fontSize: 14, fontWeight: '800', marginBottom: 7 },
+  transcriptText: { color: '#214B3D', fontSize: 15, lineHeight: 22 },
+  comparisonBox: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#CDE8D9' },
+  comparisonTitle: { color: '#14532D', fontSize: 13, fontWeight: '800' },
+  comparisonNote: { color: '#42675A', fontSize: 11, lineHeight: 16, marginTop: 4 },
+  comparisonLine: { color: '#315D4F', fontSize: 12, lineHeight: 18, marginTop: 7 },
+  transcriptionWarning: { color: '#8A4B12', fontSize: 12, lineHeight: 18, marginTop: 10, textAlign: 'center' },
   processingContainer: {
     alignItems: 'center',
   },

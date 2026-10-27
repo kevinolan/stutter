@@ -42,6 +42,22 @@ describe('backend API (in-memory DB)', () => {
     expect(res.body.ok).toBe(true);
   });
 
+  test('POST /api/transcribe returns a clear 503 when the speech provider is not configured', async () => {
+    const previousKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      const res = await request(app)
+        .post('/api/transcribe')
+        .set('Content-Type', 'audio/wav')
+        .send(Buffer.from('audio-test'));
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe('transcription_not_configured');
+    } finally {
+      if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousKey;
+    }
+  });
+
   test('POST /api/users accepts a valid client (open) and returns 201', async () => {
     const res = await request(app)
       .post('/api/users')

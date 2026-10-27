@@ -35,7 +35,7 @@
     "@types/node": "^26.4.1",
     "@types/react": "~18.3.12",
     "eslint": "^10.9.1",
-    "typescript": "^7.0.2"
+    "typescript": "~5.9.3"
   },
   "private": true,
   "expo": {
